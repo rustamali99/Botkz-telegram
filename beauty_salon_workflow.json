@@ -1,0 +1,172 @@
+{
+  "name": "Beauty Salon Booking",
+  "nodes": [
+    {
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "parameters": {
+        "updates": ["message"],
+        "botToken": "={{ $env.TELEGRAM_TOKEN }}"
+      }
+    },
+    {
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [250, 0],
+      "parameters": {
+        "functionCode": "const text = $json.message.text;\nconst [command, ...args] = text.split(' ');\nif (command === 'create') {\n  item.action = 'create';\n  item.date = args[0];\n  item.time = args[1];\n  item.service = args.slice(2).join(' ');\n} else if (command === 'update') {\n  item.action = 'update';\n  item.eventId = args[0];\n  item.date = args[1];\n  item.time = args[2];\n  item.service = args.slice(3).join(' ');\n} else if (command === 'delete') {\n  item.action = 'delete';\n  item.eventId = args[0];\n} else {\n  item.action = 'unknown';\n}\nreturn item;"
+      }
+    },
+    {
+      "name": "Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [500, 0],
+      "parameters": {
+        "value1": "={{ $json.action }}",
+        "rules": [
+          { "value2": "create" },
+          { "value2": "update" },
+          { "value2": "delete" }
+        ]
+      }
+    },
+    {
+      "name": "Create Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [750, -100],
+      "parameters": {
+        "operation": "insert",
+        "calendar": "primary",
+        "start": "={{ $json.date + 'T' + $json.time + ':00.000Z' }}",
+        "end": "={{ $json.date + 'T' + $json.time + ':00.000Z' }}",
+        "summary": "={{ $json.service }}"
+      },
+      "credentials": { "googleApi": "Google Calendar" }
+    },
+    {
+      "name": "Update Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [750, 0],
+      "parameters": {
+        "operation": "update",
+        "calendar": "primary",
+        "eventId": "={{ $json.eventId }}",
+        "start": "={{ $json.date + 'T' + $json.time + ':00.000Z' }}",
+        "end": "={{ $json.date + 'T' + $json.time + ':00.000Z' }}",
+        "summary": "={{ $json.service }}"
+      },
+      "credentials": { "googleApi": "Google Calendar" }
+    },
+    {
+      "name": "Delete Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [750, 100],
+      "parameters": {
+        "operation": "delete",
+        "calendar": "primary",
+        "eventId": "={{ $json.eventId }}"
+      },
+      "credentials": { "googleApi": "Google Calendar" }
+    },
+    {
+      "name": "OpenAI Response",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1000, 0],
+      "parameters": {
+        "prompt": "Confirm salon booking",
+        "text": "={{`Action: ${$json.action}. Date: ${$json.date} Time: ${$json.time} Service: ${$json.service}`}}"
+      },
+      "credentials": { "openAIApi": "OpenAI" }
+    },
+    {
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1250, 0],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.message.chat.id }}",
+        "text": "={{ $node['OpenAI Response'].json.choices[0].text || 'Done' }}"
+      },
+      "credentials": { "telegramApi": "Telegram Bot" }
+    },
+    {
+      "name": "Send WhatsApp",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1250, 100],
+      "parameters": {
+        "resource": "message",
+        "from": "=+1234567890",
+        "to": "={{ $json.whatsapp }}",
+        "message": "={{ $node['OpenAI Response'].json.choices[0].text }}"
+      },
+      "credentials": { "twilioApi": "Twilio" }
+    },
+    {
+      "name": "Send Instagram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1250, -100],
+      "parameters": {
+        "url": "={{ $env.INSTAGRAM_WEBHOOK }}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "{ \"text\": \"={{ $node['OpenAI Response'].json.choices[0].text }}\" }"
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [ { "node": "Parse Command", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Parse Command": {
+      "main": [
+        [ { "node": "Switch", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [ { "node": "Create Event", "type": "main", "index": 0 } ],
+        [ { "node": "Update Event", "type": "main", "index": 0 } ],
+        [ { "node": "Delete Event", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Create Event": {
+      "main": [
+        [ { "node": "OpenAI Response", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Update Event": {
+      "main": [
+        [ { "node": "OpenAI Response", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Delete Event": {
+      "main": [
+        [ { "node": "OpenAI Response", "type": "main", "index": 0 } ]
+      ]
+    },
+    "OpenAI Response": {
+      "main": [
+        [ { "node": "Send Telegram", "type": "main", "index": 0 } ],
+        [ { "node": "Send WhatsApp", "type": "main", "index": 0 } ],
+        [ { "node": "Send Instagram", "type": "main", "index": 0 } ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "1"
+}
